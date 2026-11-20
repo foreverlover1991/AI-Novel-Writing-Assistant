@@ -15,7 +15,7 @@
 3. **后端镜像基础镜像固定为 `node:24-alpine`**：与本机已有镜像对齐，同时通过 `NODE_IMAGE` 构建参数保留切换空间。
 4. **唯一对外端口是 Web 的 `8080`**：后端监听容器内 `0.0.0.0:3000` 但不发布宿主机端口；数据库与向量库只在内部网络可达。
 5. **迁移是编排内的一次性任务**：`migrate` 服务挂 `tools` profile，入口固定为 `scripts/deploy-prisma-postgres.cjs`。
-6. **镜像名直接写在编排的 `image:` 字段，不留 `.env` 变量**：postgres/nginx 固定取内网仓库 `10.62.107.200:30085/agentops/middleware/` 的 arm64 标签，后端与迁移用本机构建的 `ai-novel-api:latest`；qdrant 在内网仓库没有对应 repository，保留 Docker Hub 官方名。不留变量是为了避免“编排默认值与 .env 覆盖值”两处事实源。
+6. **镜像名直接写在编排的 `image:` 字段，不留 `.env` 变量**：三个基础服务统一用内网仓库 `10.62.107.200:30085/agentops/middleware/` 的 arm64 标签，后端与迁移用本机构建的 `ai-novel-api:latest`。注意 qdrant 在内网仓库没有对应 repository，其内网名是本机用 `docker tag` 从官方镜像补的——只解决本机命名统一，换机器部署需先同样打名。不留变量是为了避免“编排默认值与 .env 覆盖值”两处事实源。
 
 ## 当前规则
 

@@ -6,8 +6,8 @@ name: ai-novel-web
 #   2. 前端产物由宿主机 pnpm 打包生成 client/dist，再以只读卷挂载进 nginx 容器，不进镜像。
 #   3. 后端镜像只负责运行时与依赖，数据库、向量库、图片资产全部落在命名卷里，可随镜像重建保留。
 # 变量放在同目录 .env（模板见 .env.example）。镜像名直接写在各服务的 image 字段，
-# 不留变量：postgres/nginx 取自内网仓库 10.62.107.200:30085，qdrant 在内网仓库没有
-# 对应 repository，保留 Docker Hub 官方名。
+# 不留变量，统一用内网仓库 10.62.107.200:30085 前缀；其中 qdrant 在内网仓库没有
+# 对应 repository，本机用 docker tag 从官方镜像补的内网名，换机器部署需先同样打名。
 #
 # 兼容提示：宿主 Docker 低于 20.10.10 时，默认 seccomp 配置未放行 clone3，
 # PostgreSQL 与 Qdrant 会因 “Operation not permitted” 无法启动子进程/线程。
@@ -36,7 +36,7 @@ services:
     networks: [default]
 
   qdrant:
-    image: qdrant/qdrant:v1.19
+    image: 10.62.107.200:30085/agentops/middleware/qdrant:v1.19-arm64
     container_name: ai-novel-qdrant
     restart: unless-stopped
     security_opt:

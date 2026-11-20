@@ -28,9 +28,9 @@
 
 - Docker 与 docker-compose v2。
 - Node.js 与 pnpm 满足根 `package.json` 的 `engines`，仅用于在宿主机打包前端。
-- 编排文件里的镜像名已直接写在 `image:` 字段，不需要联网拉取，但本机要先有这些镜像：
-  - 内网仓库 `10.62.107.200:30085/agentops/middleware/postgres:16.15-arm64` 与 `.../nginx:1.30.2-arm64`
-  - Qdrant 用 Docker Hub 官方名 `qdrant/qdrant:v1.19`（内网仓库没有 qdrant repository）
+- 编排文件里的镜像名已直接写在 `image:` 字段，统一带内网仓库前缀 `10.62.107.200:30085/agentops/middleware/`：
+  - `postgres:16.15-arm64`、`nginx:1.30.2-arm64` 可直接从内网仓库拉取
+  - `qdrant:v1.19-arm64` 内网仓库没有对应 repository，本机已用 `docker tag qdrant/qdrant:v1.19 <内网名>` 补名；换机器部署时需先同样打名或先 `docker pull` 官方镜像
   - 后端构建基础镜像 `node:24-alpine`（`Dockerfile.api` 的 `NODE_IMAGE`，可用 `--build-arg` 覆盖）
 
 ## 部署步骤

@@ -1,12 +1,11 @@
-ARG NODE_IMAGE=node:20-bookworm-slim
+ARG NODE_IMAGE=node:24-alpine
 FROM ${NODE_IMAGE} AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=${PNPM_HOME}:${PATH}
 ENV NODE_ENV=development
 USER root
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 make g++ openssl \
-    && rm -rf /var/lib/apt/lists/* \
+# better-sqlite3 has no musl prebuilds, so it is compiled here; openssl is required by Prisma engines.
+RUN apk add --no-cache python3 make g++ openssl postgresql-client \
     && corepack enable
 
 FROM base AS deps
@@ -24,6 +23,7 @@ ENV AI_NOVEL_DATABASE_MODE=postgresql
 COPY shared/package.json shared/tsconfig.json ./shared/
 COPY shared/*.ts ./shared/
 COPY shared/types ./shared/types
+COPY shared/utils ./shared/utils
 COPY server/package.json server/tsconfig.json server/prisma.config.ts ./server/
 COPY server/src ./server/src
 RUN pnpm --filter @ai-novel/shared build \
@@ -49,7 +49,10 @@ FROM ${NODE_IMAGE} AS runtime
 USER root
 WORKDIR /app
 ENV NODE_ENV=production
-RUN rm -rf /app/* /app/.[!.]* /app/..?* || true
+# libstdc++ keeps the musl-compiled better-sqlite3 loadable; postgresql-client lets the image run the
+# official PostgreSQL baseline migration without a separate tool container.
+RUN apk add --no-cache libstdc++ openssl postgresql-client \
+    && rm -rf /app/* /app/.[!.]* /app/..?* || true
 COPY --from=build --chown=node:node /app/package.json ./package.json
 COPY --from=build --chown=node:node /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules

@@ -1,6 +1,7 @@
 import type { LLMProvider, ProviderAuthMode } from "@ai-novel/shared/types/llm";
 import {
   isBuiltInProvider,
+  normalizeProviderApiKey,
   providerRequiresApiKey,
   PROVIDERS,
   resolveProviderBaseUrl,
@@ -134,11 +135,32 @@ async function fetchJson(url: string, init: RequestInit): Promise<unknown> {
     });
 
     if (!response.ok) {
-      const detail = await response.text();
+      // 返回体可能是大段 HTML 错误页，截断后放进提示，避免报错信息不可读。
+      const detail = (await response.text()).slice(0, 160);
       throw new Error(`拉取模型列表失败（${response.status}）：${detail || "未知错误"}`);
     }
 
-    return response.json();
+    // 目录地址偶尔会指向网关的网页控制台：状态码是 200，但正文是 HTML。
+    // 这里先识别内容再解析，避免裸 json() 抛出无意义的 SyntaxError 变成 500。
+    const contentType = response.headers.get("content-type") ?? "";
+    const raw = await response.text();
+    if (!(/json/i.test(contentType) || /^\s*[[{]/.test(raw))) {
+      throw new Error(
+        `拉取模型列表失败：接口返回了网页而不是 JSON（content-type: ${contentType || "未知"}）。`
+        + "请把 API URL 填成模型服务的版本根地址（例如 http://主机:端口/v1），而不是网页控制台地址。",
+      );
+    }
+
+    try {
+      return JSON.parse(raw) as unknown;
+    } catch {
+      throw new Error("拉取模型列表失败：接口返回的内容无法解析成 JSON，请确认 API URL 指向模型服务。");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("拉取模型列表失败：请求超时。请检查网络连通性后重试。");
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -254,7 +276,7 @@ export async function getProviderModels(
     }
   }
 
-  const normalizedApiKey = options.apiKey?.trim();
+  const normalizedApiKey = normalizeProviderApiKey(options.apiKey);
   const allowAnonymous = options.allowAnonymous ?? !providerRequiresApiKey(provider);
   const canFetchRemotely = normalizedApiKey || allowAnonymous;
   if (!canFetchRemotely) {
@@ -279,6 +301,6 @@ export async function refreshProviderModels(
   baseURL?: string,
   authMode?: ProviderAuthMode,
 ): Promise<string[]> {
-  const models = await fetchProviderModels(provider, apiKey?.trim(), baseURL, authMode);
+  const models = await fetchProviderModels(provider, normalizeProviderApiKey(apiKey), baseURL, authMode);
   return setCachedModels(provider, models, baseURL);
 }

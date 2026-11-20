@@ -21,6 +21,10 @@ transport 重试层又因为拿不到 httpStatus 而对同一个被拒的 schema
 流式、strict、default、enum 均无关）。探测用的小 schema 测不出这一点，
 档案记成“支持 json_schema”，导演运行在合同步骤上被 400 卡住。
 
+同一故障族还有不带状态码的变体：vLLM/SGLang 类解码器把不支持的 JSON Schema
+关键字报成 `Grammar error: Unimplemented keys: ["propertyNames"]`，并包装成
+服务端错误。它同样只在产品级大 schema 上出现，光看 4xx 无法识别。
+
 ## Current Rule
 
 - `implicatesStructuredMode`：httpStatus 为 400/422，或消息以 400/422 开头、
@@ -28,6 +32,9 @@ transport 重试层又因为拿不到 httpStatus 而对同一个被拒的 schema
   模式失败的口径一致）。401/403/429 与网络、超时、预算类失败原因仍优先排除。
 - `classifyResponseEvidence`：错误对象上没有 status 字段时，从消息开头或
   `status code NNN` 中回收 httpStatus，让重试层不再对 4xx 盲目重试。
+- 解码器语法拒收的措辞（`Grammar error` / `Unimplemented keys`）也直接记为模式
+  失败。这类文案描述的是本次策略的 schema 关键字，与链路无关，所以即使端点把它
+  报成 5xx 也不能当成可重试的传输错误。
 
 ## Related Modules
 
@@ -35,4 +42,5 @@ transport 重试层又因为拿不到 httpStatus 而对同一个被拒的 schema
 - `server/src/platform/llm/diagnostics/structuredEvidence.ts`（`classifyResponseEvidence`）
 - `server/src/llm/structuredInvoke.ts`（策略链与 transport 重试）
 - `server/src/llm/compatibility/probe.ts`（探测侧的 400/422 口径）
-- 回归测试：`server/tests/structured400ModeFallback.test.js`
+- 回归测试：`server/tests/structured400ModeFallback.test.js`、
+  `server/tests/modelCompatibility.test.js`（服务端错误包裹的语法拒收仍然降级）

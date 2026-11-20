@@ -1,6 +1,7 @@
 import {applyCacheRequestPolicy,getPromptCacheBoundary,resolveCacheCapability} from "../platform/llm/cache";
 import { IterableReadableStream } from "@langchain/core/utils/stream";
 import { DEFAULT_MODEL_OUTPUT_TOKENS } from "@ai-novel/shared/types/llm";
+import type { ProviderAuthMode } from "@ai-novel/shared/types/llm";
 import {
   AIMessage,
   AIMessageChunk,
@@ -16,6 +17,11 @@ interface AnthropicLLMOptions {
   temperature: number;
   maxTokens?: number;
   timeoutMs?: number;
+  /**
+   * 网关鉴权头方案。第三方 Anthropic 兼容网关多数只读 `Authorization`，
+   * 只发 `x-api-key` 会被判为缺失鉴权头。
+   */
+  authMode?: ProviderAuthMode;
 }
 
 type AnthropicRole = "user" | "assistant";
@@ -56,6 +62,21 @@ function detectRole(message: BaseMessage): "system" | AnthropicRole {
 function normalizeBaseURL(baseURL: string): string {
   const trimmed = baseURL.trim().replace(/\/+$/u, "");
   return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
+}
+
+function buildAuthHeaders(authMode: ProviderAuthMode, apiKey?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    "anthropic-version": process.env.ANTHROPIC_VERSION ?? "2023-06-01",
+  };
+  if (authMode === "none" || !apiKey) {
+    return headers;
+  }
+  if (authMode === "x-api-key") {
+    headers["x-api-key"] = apiKey;
+    return headers;
+  }
+  headers.Authorization = `Bearer ${apiKey}`;
+  return headers;
 }
 
 function convertMessages(messages: BaseMessage[]): { system?: {type:"text";text:string}[]; messages: AnthropicMessage[]; cacheBoundary: import("../platform/llm/cache").PromptCacheBoundary|null } {
@@ -172,8 +193,7 @@ export function createAnthropicLLM(options: AnthropicLLMOptions): {
         signal: controller.signal,
         headers: {
           "content-type": "application/json",
-          "x-api-key": options.apiKey ?? "",
-          "anthropic-version": process.env.ANTHROPIC_VERSION ?? "2023-06-01",
+          ...buildAuthHeaders(options.authMode ?? "x-api-key", options.apiKey),
         },
         body: JSON.stringify(applyCacheRequestPolicy({
           model: options.model,

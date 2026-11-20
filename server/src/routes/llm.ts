@@ -4,7 +4,7 @@ import type { ApiResponse } from "@ai-novel/shared/types/api";
 import { PROVIDER_AUTH_MODES } from "@ai-novel/shared/types/llm";
 import { z } from "zod";
 import { prisma } from "../db/prisma";
-import { llmConnectivityService } from "../llm/connectivity";
+import { llmConnectivityService, probeEmbeddingEndpoint } from "../llm/connectivity";
 import { getStructuredFallbackSettings, saveStructuredFallbackSettings } from "../llm/structuredFallbackSettings";
 import { filterHiddenModels, getProviderModels, parseHiddenModels } from "../llm/modelCatalog";
 import { listModelRouteConfigs, MODEL_ROUTE_TASK_TYPES, upsertModelRouteConfig } from "../llm/modelRouter";
@@ -209,6 +209,40 @@ router.post(
           next(new AppError(result.error ?? "未配置可用的模型连接。", 400));
           return;
         }
+        // 对话探测全部失败时，向量化专用渠道（只有 /embeddings 端点的服务）也会走到这里。
+        // 补一次真实的向量化请求识别渠道能力，避免把配置正确的向量服务判成连接失败。
+        // 弹窗里留空沿用保存配置时请求不带 key/地址，探测前先回退到已保存记录，
+        // 否则缺少鉴权的探测会把配置正确的向量服务判成失败。
+        const savedKeyConfig = await prisma.aPIKey.findFirst({ where: { provider } });
+        const probeBaseURL = baseURL?.trim() || savedKeyConfig?.baseURL?.trim() || "";
+        const savedAuthMode = savedKeyConfig?.authMode === "x-api-key" || savedKeyConfig?.authMode === "none"
+          ? savedKeyConfig.authMode
+          : undefined;
+        if (probeBaseURL) {
+          const embedding = await probeEmbeddingEndpoint({
+            provider,
+            apiKey: apiKey?.trim() || savedKeyConfig?.key || undefined,
+            model: model?.trim() || savedKeyConfig?.model?.trim() || undefined,
+            baseURL: probeBaseURL,
+            authMode: authMode ?? savedAuthMode,
+          });
+          if (embedding.ok) {
+            res.status(200).json({
+              success: true,
+              data: {
+                success: true,
+                model: model ?? "",
+                latency: embedding.latency ?? 0,
+                plain: result.plain,
+                structured: result.structured,
+                embedding,
+                embeddingOnly: true,
+              },
+              message: "该地址是向量化专用渠道。",
+            } satisfies ApiResponse<Record<string, unknown>>);
+            return;
+          }
+        }
         next(new AppError(result.error ?? "模型连通性测试失败。", 400));
         return;
       }
@@ -231,6 +265,12 @@ router.post(
       };
       res.status(200).json(response);
     } catch (error) {
+      // 缺少密钥这类配置错误由工厂直接抛出，按用户可执行的提示返回 400，而不是笼统的服务器错误。
+      const message = error instanceof Error ? error.message : "";
+      if (/API Key|未配置/.test(message)) {
+        next(new AppError(message, 400));
+        return;
+      }
       next(error);
     }
   },

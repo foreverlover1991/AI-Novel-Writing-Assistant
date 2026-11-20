@@ -146,8 +146,42 @@ export function isBuiltInProvider(provider: string): provider is BuiltinLLMProvi
   return isBuiltinLLMProvider(provider);
 }
 
+/**
+ * 接口文档里的请求地址经常是带操作路径的完整 URL，而传输层会自己拼接操作路径。
+ * 这里只保留版本根地址，避免请求变成 `/chat/completions/chat/completions`。
+ */
+const BASE_URL_OPERATION_PATHS = [
+  "chat/completions",
+  "completions",
+  "responses",
+  "messages",
+  "embeddings",
+] as const;
+
 export function normalizeBaseURL(baseURL: string): string {
-  return baseURL.endsWith("/") ? baseURL.slice(0, -1) : baseURL;
+  let normalized = baseURL.trim().replace(/\/+$/u, "");
+  const lowered = normalized.toLowerCase();
+  for (const operation of BASE_URL_OPERATION_PATHS) {
+    const suffix = `/${operation}`;
+    if (lowered.endsWith(suffix)) {
+      normalized = normalized.slice(0, -suffix.length).replace(/\/+$/u, "");
+      break;
+    }
+  }
+  return normalized || baseURL.trim();
+}
+
+/**
+ * 渠道文档常把鉴权值整段写成 `Bearer <key>`。发送前统一去掉方案前缀，
+ * 避免拼成 `Authorization: Bearer Bearer <key>` 后被渠道判定密钥无效。
+ */
+export function normalizeProviderApiKey(value?: string | null): string | undefined {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) {
+    return undefined;
+  }
+  const withoutScheme = trimmed.replace(/^bearer\s+/iu, "").trim();
+  return withoutScheme || undefined;
 }
 
 export function getProviderEnvApiKey(provider: LLMProvider): string | undefined {
@@ -155,8 +189,7 @@ export function getProviderEnvApiKey(provider: LLMProvider): string | undefined 
     return undefined;
   }
   const envKey = PROVIDERS[provider].envKey;
-  const value = process.env[envKey];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  return normalizeProviderApiKey(process.env[envKey]);
 }
 
 export function getProviderEnvBaseUrl(provider: LLMProvider): string | undefined {

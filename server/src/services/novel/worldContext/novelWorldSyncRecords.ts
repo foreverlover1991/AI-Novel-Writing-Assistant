@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import type { NovelWorldSyncRecordSummary, NovelWorldSyncSection } from "@ai-novel/shared/types/novelWorld";
 import { prisma } from "../../../db/prisma";
 
@@ -10,6 +11,7 @@ interface WorldSyncRecordRow {
   createdAt: Date | string;
 }
 
+const MAX_SYNC_RECORD_LIMIT = 100;
 const VALID_SYNC_SECTIONS = new Set<NovelWorldSyncSection>([
   "profile",
   "rules",
@@ -43,7 +45,10 @@ export async function listNovelWorldSyncRecords(
   if (!novelWorldId) {
     return [];
   }
-  const rows = await prisma.$queryRaw<WorldSyncRecordRow[]>`
+  // Postgres 无法从 LIMIT 的占位符推断参数类型（42P18），这里先把读取条数收敛成
+  // 确定范围内的整数再拼进语句，两种数据库引擎都能执行。
+  const safeLimit = Math.min(Math.max(Math.trunc(Number(limit)) || 5, 1), MAX_SYNC_RECORD_LIMIT);
+  const rows = await prisma.$queryRaw<WorldSyncRecordRow[]>(Prisma.sql`
     SELECT
       "id",
       "direction",
@@ -54,8 +59,8 @@ export async function listNovelWorldSyncRecords(
     FROM "WorldSyncRecord"
     WHERE "novelWorldId" = ${novelWorldId}
     ORDER BY "createdAt" DESC
-    LIMIT ${limit}
-  `;
+    LIMIT ${Prisma.raw(String(safeLimit))}
+  `);
   return rows.map((row) => ({
     id: row.id,
     direction: row.direction,

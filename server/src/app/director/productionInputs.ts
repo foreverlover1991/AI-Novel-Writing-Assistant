@@ -12,9 +12,9 @@ export function requireLaunch(contract: RunContract) {
   const input = contract.launchInput;
   if (!input?.storyInput.trim() || !Number.isSafeInteger(input.estimatedChapterCount) || input.estimatedChapterCount < 1
     || !contract.modelConfig.route.trim() || contract.modelConfig.route === "default"
-    || !contract.modelConfig.model.trim() || contract.modelConfig.model === "default") throw new Error("创作运行缺少故事、章数或模型快照。");
+    || !contract.modelConfig.model.trim() || contract.modelConfig.model === "default") throw new AppError("创作运行缺少故事、章数或模型快照。", 400);
   if (contract.chapterRange && (contract.chapterRange.from < 1 || contract.chapterRange.to < contract.chapterRange.from
-    || contract.chapterRange.to > input.estimatedChapterCount)) throw new Error("正文授权范围与目标章节数不一致。");
+    || contract.chapterRange.to > input.estimatedChapterCount)) throw new AppError("正文授权范围与目标章节数不一致。", 400);
   if (input.chapterTokenLimit !== undefined) directorChapterTokenLimitSchema.parse(input.chapterTokenLimit);
   return input;
 }

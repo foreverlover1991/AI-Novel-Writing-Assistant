@@ -5,6 +5,7 @@ const {
   filterHiddenModels,
   parseHiddenModels,
   parseModelList,
+  refreshProviderModels,
   resolveModelsEndpoint,
   serializeHiddenModels,
   serializeModelList,
@@ -61,4 +62,36 @@ test("custom model catalog uses the configured authentication header", () => {
   assert.deepEqual(buildProviderModelHeaders("custom_gateway", "secret", "none"), {
     Accept: "application/json",
   });
+});
+
+test("a web console page behind a 200 response is reported as a catalog failure, not a syntax error", async (t) => {
+  const mockedFetch = t.mock.method(globalThis, "fetch", async () =>
+    new Response("<!DOCTYPE html><html><body>console</body></html>", {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    }));
+
+  await assert.rejects(
+    refreshProviderModels("custom_preview", "secret", "http://gateway.local", "bearer"),
+    (error) => {
+      assert.match(error.message, /拉取模型列表失败：接口返回了网页而不是 JSON/);
+      assert.match(error.message, /版本根地址/);
+      assert.doesNotMatch(error.message, /Unexpected token/);
+      return true;
+    },
+  );
+  assert.equal(mockedFetch.mock.callCount(), 1);
+});
+
+test("an empty catalog payload is reported as an empty model list", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+
+  await assert.rejects(
+    refreshProviderModels("custom_preview", "secret", "http://gateway.local", "bearer"),
+    /模型列表为空/,
+  );
 });

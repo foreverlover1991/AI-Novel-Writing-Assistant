@@ -236,6 +236,20 @@ test("MaaS mode-specific transport rejection falls back and persists the failed 
   assert.deepEqual(compat.resolveCapability(input).failedModes, ["json_object"]);
 });
 
+test("a decoder grammar rejection reported as a server error still falls back to prompt JSON", async (t) => {
+  const input = identity("grammar-rejection");
+  await saveModes(input, ["json_schema", "prompt_only"], "probed");
+  const calls = [];
+  mockClients(t, (resolved) => {
+    calls.push(resolved.structuredStrategy);
+    if (resolved.structuredStrategy === "json_schema") throw Object.assign(new Error('Grammar error: Unimplemented keys: ["propertyNames"]'), { status: 500 });
+    return stream(fixtures.ok);
+  });
+  assert.deepEqual((await invokeStructuredLlmDetailed({ ...input, schema, label: "compat.fixture.grammar", systemPrompt: "JSON", userPrompt: "ok", disableFallbackModel: true })).data, { ok: true });
+  assert.deepEqual(calls, ["json_schema", "prompt_json"]);
+  assert.deepEqual(compat.resolveCapability(input).failedModes, ["json_schema"]);
+});
+
 test("unprobed relay thinking-off omits vendor controls and accepts content without reasoning", () => {
   const behavior = resolveProviderReasoningBehavior({ provider: "custom_deepseek_fixture", model: "vendor/deepseek-v4.1-flash", baseURL: "https://fixture.invalid/v1", reasoningEnabled: false, reasoningEffort: "max" });
   assert.equal(behavior.modelKwargs, undefined);
@@ -270,6 +284,15 @@ test("unknown service thinking control is learned from reasoning-on/off fixture 
   assert.equal(result.thinkingToggle.supported, true);
   assert.equal(result.thinkingToggle.control, "enable_thinking");
   assert.equal(result.reasoningField, "reasoning_content");
+});
+
+test("a relay that ignores the top-level switch is learned through the template thinking kwargs", async (t) => {
+  const input = identity("vllm-thinking-discovery");
+  const thinks = (resolved) => resolved.modelKwargs?.chat_template_kwargs?.enable_thinking !== false;
+  mockClients(t, (resolved, messages, options) => stream(options.tools ? fixtures.tool : thinks(resolved) ? fixtures.thinking : fixtures.ok));
+  const result = await probeModel(input, { allowNetwork: true, requestDelayMs: 0 });
+  assert.equal(result.thinkingToggle.supported, true);
+  assert.equal(result.thinkingToggle.control, "chat_template_enable_thinking");
 });
 
 test("auth and rate limits do not poison capability modes; automatic probes stay opt-in", async (t) => {

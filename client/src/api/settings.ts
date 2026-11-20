@@ -580,6 +580,13 @@ export async function testLLMConnection(payload: {
         latency: number | null;
         error: string | null;
       } | null;
+      embedding?: {
+        ok: boolean;
+        latency: number | null;
+        error: string | null;
+        endpoint: string | null;
+      } | null;
+      embeddingOnly?: boolean;
       structured: {
         ok: boolean;
         latency: number | null;

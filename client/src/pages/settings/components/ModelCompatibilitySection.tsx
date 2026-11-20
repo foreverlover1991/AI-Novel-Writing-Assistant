@@ -62,7 +62,7 @@ export default function ModelCompatibilitySection({ provider }: { provider: APIK
       <summary className="cursor-pointer">指定自定义服务能力</summary>
       <div className="mt-2 space-y-2">
         <label className="flex items-center gap-2">优先输出方式<select className="rounded border bg-background p-1" value={mode || data.profile.structuredModes[0]} onChange={(event) => setMode(event.target.value)}>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label className="flex items-center gap-2">思考控制参数<select className="rounded border bg-background p-1" value={control || data.profile.thinkingToggle.control} onChange={(event) => setControl(event.target.value)}>{["none", "thinking", "thinking_boolean", "enable_thinking", "reasoning_effort"].map((value) => <option key={value} value={value}>{value === "none" ? "不指定" : value}</option>)}</select></label>
+        <label className="flex items-center gap-2">思考控制参数<select className="rounded border bg-background p-1" value={control || data.profile.thinkingToggle.control} onChange={(event) => setControl(event.target.value)}>{["none", "thinking", "thinking_boolean", "enable_thinking", "chat_template_enable_thinking", "reasoning_effort"].map((value) => <option key={value} value={value}>{value === "none" ? "不指定" : value}</option>)}</select></label>
         <Button size="sm" variant="outline" disabled={override.isPending} onClick={() => override.mutate()}>保存指定能力</Button>
         <p className="text-muted-foreground">指定能力优先于探测结果，适用于服务商提供了明确参数说明的连接。</p>
       </div>

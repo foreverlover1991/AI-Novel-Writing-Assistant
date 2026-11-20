@@ -126,7 +126,7 @@ export async function probeModel(input: ModelIdentity, options: { allowNetwork: 
   const plain = await pacedRun("prompt_only");
   reasoningChars = Math.max(reasoningChars, plain.reasoningChars);
   if (toggle.control === "none" && plain.reasoningChars > 2) {
-    for (const control of ["enable_thinking", "thinking", "thinking_boolean", "reasoning_effort"] as const) {
+    for (const control of ["enable_thinking", "chat_template_enable_thinking", "thinking", "thinking_boolean", "reasoning_effort"] as const) {
       try {
         const result = await pacedRun("prompt_only", { ...base.modelKwargs, ...thinkingControlKwargs({ supported: true, control, effort: false }, false) });
         if (result.reasoningChars <= 2) { toggle.control = control; toggle.supported = true; reasoningChars = 0; break; }

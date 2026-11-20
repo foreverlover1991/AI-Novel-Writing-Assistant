@@ -4,6 +4,7 @@ import type { LLMProvider } from "@ai-novel/shared/types/llm";
 import {
   getProviderEnvApiKey,
   isBuiltInProvider,
+  normalizeProviderApiKey,
   providerRequiresApiKey,
   PROVIDERS,
   resolveProviderBaseUrl,
@@ -119,8 +120,12 @@ export class EmbeddingService {
   private async resolveApiKey(provider: LLMProvider): Promise<string | undefined> {
     try {
       const dbSecret = await prisma.aPIKey.findUnique({ where: { provider } });
-      if (dbSecret?.isActive && dbSecret.key?.trim()) {
-        return dbSecret.key.trim();
+      if (dbSecret?.isActive) {
+        // 渠道密钥可能带着鉴权方案前缀被保存，这里统一剥掉，避免拼出双重 `Bearer`。
+        const secretKey = normalizeProviderApiKey(dbSecret.key);
+        if (secretKey) {
+          return secretKey;
+        }
       }
     } catch (error) {
       if (!isMissingTableError(error)) {

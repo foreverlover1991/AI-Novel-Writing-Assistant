@@ -7,7 +7,7 @@ export type StructuredMode = z.infer<typeof structuredModeSchema>;
 export const capabilityProfileSchema = z.object({
   structuredModes: z.array(structuredModeSchema).min(1),
   failedModes: z.array(structuredModeSchema).default([]),
-  thinkingToggle: z.object({ supported: z.boolean(), control: z.enum(["none", "thinking", "thinking_boolean", "enable_thinking", "reasoning_effort"]), effort: z.boolean().default(false) }),
+  thinkingToggle: z.object({ supported: z.boolean(), control: z.enum(["none", "thinking", "thinking_boolean", "enable_thinking", "chat_template_enable_thinking", "reasoning_effort"]), effort: z.boolean().default(false) }),
   reasoningField: z.enum(["none", "reasoning_content", "reasoning", "think_tags", "reasoning_details"]),
   reasoningRequired: z.boolean().optional(),
   maxContext: z.number().int().positive().optional(),

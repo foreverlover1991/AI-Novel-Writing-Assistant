@@ -5,6 +5,7 @@ import type {
   ModelRouteTaskType,
 } from "@ai-novel/shared/types/novel";
 import { prisma } from "../db/prisma";
+import { getLLMSelectionSettings } from "../services/settings/LLMSelectionSettingsService";
 import { PROVIDERS } from "./providers";
 import type { StructuredOutputStrategy } from "./structuredOutput";
 
@@ -252,6 +253,28 @@ function normalizeTaskType(taskType: TaskType): ModelRouteTaskType | "default" {
   return "default";
 }
 
+export interface SelectedLLMChannel {
+  provider: LLMProvider;
+  model: string;
+}
+
+/**
+ * 用户在模型设置里选择的全局渠道。
+ * 未选择或读取失败时返回 null，由调用方决定是否回落到内置默认路由。
+ */
+export async function resolveSelectedLLMChannel(): Promise<SelectedLLMChannel | null> {
+  try {
+    const selection = await getLLMSelectionSettings();
+    if (!selection) {
+      return null;
+    }
+    const model = selection.model.trim();
+    return model ? { provider: selection.provider, model } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveModel(
   taskType: TaskType,
   userOverride?: {
@@ -291,8 +314,15 @@ export async function resolveModel(
     // table may not exist yet
   }
 
+  // 该任务类型没有保存路由时，用户的全局模型选择优先于内置默认渠道，
+  // 否则只用自建网关的用户会在规划、拆书等能力上撞到没有配置的默认厂商。
+  const selectedChannel = await resolveSelectedLLMChannel();
+  const fallbackBase = selectedChannel
+    ? { ...base, provider: selectedChannel.provider, model: selectedChannel.model }
+    : base;
+
   return applyOverrides({
-    ...base,
+    ...fallbackBase,
     routeKey: normalizedTaskType,
     routeDegraded: normalizedTaskType !== "default"
       && STRICT_ROUTE_TASK_TYPES.has(normalizedTaskType),

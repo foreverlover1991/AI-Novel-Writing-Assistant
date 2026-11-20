@@ -20,15 +20,25 @@ import {
   type StructuredOutputStrategy,
 } from "./structuredOutput";
 import { attachLLMUsageTracking } from "./compatibility";
-import { resolveModel, toStructuredOutputStrategy, type TaskType } from "./modelRouter";
+import {
+  resolveModel,
+  resolveSelectedLLMChannel,
+  toStructuredOutputStrategy,
+  type SelectedLLMChannel,
+  type TaskType,
+} from "./modelRouter";
 import {
   getProviderEnvApiKey,
   getProviderEnvModel,
   isBuiltInProvider,
+  normalizeProviderApiKey,
   providerRequiresApiKey,
   PROVIDERS,
   resolveProviderBaseUrl,
 } from "./providers";
+
+/** 历史遗留的默认渠道，只在用户与调用方都没有选择渠道时使用。 */
+const LEGACY_DEFAULT_PROVIDER: LLMProvider = "deepseek";
 
 interface LLMOptions {
   model?: string;
@@ -219,12 +229,43 @@ async function resolveProviderSecret(provider: LLMProvider): Promise<ProviderSec
   }
 }
 
+/** 该厂商在当前环境里是否已经拿到可用密钥。 */
+async function hasProviderCredential(provider: LLMProvider): Promise<boolean> {
+  if (!providerRequiresApiKey(provider)) {
+    return true;
+  }
+  const secret = await resolveProviderSecret(provider);
+  return Boolean(normalizeProviderApiKey(secret?.key) || getProviderEnvApiKey(provider));
+}
+
+/**
+ * 部分服务在调用参数里写死了历史默认渠道。该渠道并未配置密钥时，回落到用户实际选择的
+ * 全局渠道，否则这些能力在只用自建网关的环境下会整体不可用。
+ */
+async function resolveLegacyDefaultChannelSwap(
+  requestedProvider: LLMProvider | undefined,
+  resolvedProvider: LLMProvider,
+): Promise<SelectedLLMChannel | null> {
+  const reliedOnLegacyDefault = requestedProvider == null || requestedProvider === LEGACY_DEFAULT_PROVIDER;
+  if (!reliedOnLegacyDefault || resolvedProvider !== LEGACY_DEFAULT_PROVIDER) {
+    return null;
+  }
+  if (await hasProviderCredential(LEGACY_DEFAULT_PROVIDER)) {
+    return null;
+  }
+  const selected = await resolveSelectedLLMChannel();
+  if (!selected || selected.provider === LEGACY_DEFAULT_PROVIDER) {
+    return null;
+  }
+  return await hasProviderCredential(selected.provider) ? selected : null;
+}
+
 export async function resolveLLMClientOptions(
   provider?: LLMProvider,
   rawOptions: LLMOptions = {},
 ): Promise<ResolvedLLMClientOptions> {
   const options: LLMOptions = { ...rawOptions };
-  let resolvedProvider = provider ?? options.fallbackProvider ?? "deepseek";
+  let resolvedProvider = provider ?? options.fallbackProvider ?? LEGACY_DEFAULT_PROVIDER;
   let resolvedModel = normalizeOptionalText(options.model);
   let resolvedTemperature: number | undefined = options.temperature;
   let resolvedMaxTokens: number | undefined = options.maxTokens;
@@ -268,15 +309,28 @@ export async function resolveLLMClientOptions(
     resolvedRouteDegraded = route.routeDegraded;
   }
 
+  // 显式携带密钥或 API 地址的调用属于直连场景，不改写渠道。
+  const canSwapLegacyDefault = !normalizeOptionalText(options.apiKey) && !normalizeOptionalText(options.baseURL);
+  if (canSwapLegacyDefault) {
+    const legacyChannelSwap = await resolveLegacyDefaultChannelSwap(provider, resolvedProvider);
+    if (legacyChannelSwap) {
+      resolvedProvider = legacyChannelSwap.provider;
+      resolvedModel = legacyChannelSwap.model;
+    }
+  }
+
   const dbSecret = await resolveProviderSecret(resolvedProvider);
   const providerName = isBuiltInProvider(resolvedProvider)
     ? PROVIDERS[resolvedProvider].name
     : dbSecret?.displayName ?? resolvedProvider;
-  const apiKey = normalizeOptionalText(options.apiKey)
-    ?? dbSecret?.key
+  const apiKey = normalizeProviderApiKey(options.apiKey)
+    ?? normalizeProviderApiKey(dbSecret?.key)
     ?? getProviderEnvApiKey(resolvedProvider);
 
   if (!apiKey && providerRequiresApiKey(resolvedProvider)) {
+    if (resolvedProvider === LEGACY_DEFAULT_PROVIDER && !(await resolveSelectedLLMChannel())) {
+      throw new Error("还没有配置可用的模型渠道。请先在模型设置中填写 API Key 并选择一个模型。");
+    }
     throw new Error(`未配置 ${providerName} 的 API Key。`);
   }
 
@@ -420,6 +474,8 @@ export function createLLMFromResolvedOptions(resolved: ResolvedLLMClientOptions)
       temperature: resolved.temperature,
       maxTokens: resolved.maxTokens,
       timeoutMs: resolved.timeoutMs,
+      // 官方 Anthropic API 只认 `x-api-key`；自定义网关按其鉴权设置发送。
+      authMode: resolved.provider === "anthropic" ? "x-api-key" : resolved.authMode,
     }) as ChatOpenAI
     : new ChatOpenAI({
       apiKey: resolved.apiKey ?? "ollama",

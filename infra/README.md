@@ -17,9 +17,10 @@
 浏览器 ──▶ web (nginx, 对外 8080)
               ├─ 静态资源：宿主机 client/dist 只读挂载
               └─ /api/   ─▶ api (node, 3000，仅内网)
-                              ├─ postgres:5432  命名卷 ai-novel-postgres
-                              ├─ qdrant:6333    命名卷 ai-novel-qdrant
-                              └─ 图片资产       命名卷 ai-novel-storage
+                              ├─ postgres:5432  data/postgres
+                              ├─ qdrant:6333    data/qdrant
+                              ├─ 图片资产        data/generated-images
+                              └─ LLM 会话日志   data/logs
 ```
 
 只有 `web` 发布端口。后端监听容器内 `0.0.0.0:3000` 但不映射到宿主机，因此外部不可直接访问；`ALLOW_LAN=false` 与访问令牌仍然保留，作为纵深防御。
@@ -113,20 +114,22 @@ docker-compose -f docker-compose.deploy.yml logs --tail=50 api
 git pull
 docker build -f Dockerfile.api -t ai-novel-api:latest .
 pnpm --filter @ai-novel/shared build && pnpm --filter @ai-novel/client build
-docker-compose -f docker-compose.deploy.yml up -d                       # 重建 api 容器
-docker-compose -f docker-compose.deploy.yml --profile tools run --rm migrate
+docker-compose -f docker-compose.yml --env-file .env up -d                      # 重建 api 容器
+docker-compose -f docker-compose.yml --env-file .env --profile tools run --rm migrate
 ```
+
+所有数据都落在宿主机 `data/` 目录（默认仓库根，`DATA_PATH` 可改）：`data/postgres` 存数据库、`data/qdrant` 存向量索引、`data/generated-images` 存生成图片、`data/logs` 存应用日志与 nginx 访问日志。目录属主是部署账号，容器以同一 uid 运行（`API_RUN_UID` 可改）。容器重建、镜像升级都不丢数据；备份就是停服后拷贝 `data/`，或用下面的 pg_dump 导出。
 
 先备份再升级：
 
 ```bash
-docker-compose -f docker-compose.deploy.yml stop api web
-docker run --rm -v ai-novel-web_ai-novel-postgres:/db -v "$PWD:/out" 10.62.107.200:30085/agentops/middleware/postgres:16.15-arm64 \
+docker-compose -f docker-compose.yml --env-file .env stop api web
+docker run --rm -v "$PWD/data/postgres":/db:ro -v "$PWD:/out" 10.62.107.200:30085/agentops/middleware/postgres:16.15-arm64 \
   pg_dump -U ai_novel -d ai_novel -F c -f /out/backup.dump
-docker-compose -f docker-compose.deploy.yml start api web
+docker-compose -f docker-compose.yml --env-file .env start api web
 ```
 
-数据库文件不要在运行时直接拷贝或替换；停容器、备份卷之后再迁移。
+数据库文件不要在运行时直接拷贝或替换；停容器、备份 `data/` 之后再迁移。
 
 ## 常见问题
 
@@ -142,6 +145,8 @@ docker-compose -f docker-compose.deploy.yml start api web
 
 ## 备份要点
 
-- `ai-novel-postgres`：小说正文、设定、任务状态、模型配置。
-- `ai-novel-storage`：生成的图片资产。
-- `ai-novel-qdrant`：向量索引，丢了可重建，但重新索引需要消耗模型调用。
+- `data/postgres`：小说正文、设定、任务状态、模型配置。
+- `data/generated-images`：生成的图片资产。
+- `data/qdrant`：向量索引，丢了可重建，但重新索引需要消耗模型调用。
+- `data/logs`：LLM 会话日志（14 天 / 50MB 自动清理）与 nginx 访问日志，可直接查看或归档。
+- 旧命名卷 `ai-novel-web_ai-novel-*` 只在首次迁移 data 目录时作为数据源，迁移完成后可保留待删。

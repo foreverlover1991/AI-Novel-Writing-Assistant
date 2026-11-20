@@ -37,6 +37,21 @@
 - 结构化任务的输出稳定性高于厂商级思考偏好。能力档案要求关闭思考时，运行时必须覆盖用户默认值，避免推理内容破坏结构化结果。
 - 顶部保存的 temperature 是用户偏好，不是绕过模型参数约束的最终请求值。正式调用必须先经过模型能力兼容层；例如 Kimi K3 的 temperature 固定为 `1.0`，即使经由自定义中转厂商调用、当前选择仍保存其他值，请求也必须按模型身份收敛到允许值。
 
+## 默认渠道解析顺序
+
+调用方没有指定厂商时，服务端按以下顺序确定实际使用的渠道：
+
+1. 请求显式携带的 provider/model，例如导演启动参数、随请求下发的顶部选择。
+2. 该任务类型在「模型路由管理」中保存的路由行 `ModelRouteConfig`。
+3. 用户在顶部保存的全局模型选择 `AppSetting.llm.currentSelection`。
+4. 历史遗留默认渠道 `deepseek`，仅在上面三项都不存在时兜底。
+
+- 第 2、3 步在 `resolveModel()` 内完成：没有路由行时，用全局选择的厂商和模型替换内置默认路由，任务自带的 temperature、请求协议和结构化偏好保持不变。这样只配置了顶部模型、从未进入过路由管理的用户，其规划、拆章、快产等能力仍走他选择的渠道。
+- 部分服务在调用参数里把历史默认渠道写成字面量（`provider ?? "deepseek"`）。当该渠道实际拿不到任何密钥（数据库与环境变量都为空）、且用户存在全局选择时，`resolveLLMClientOptions()` 会把厂商和模型一起换成全局选择；模型必须一并替换，否则会把上一个渠道的模型名发给新渠道。显式携带 `apiKey` 或 `baseURL` 的直连调用不参与这次替换。
+- 只有当路由行确实保存了某个厂商时，该厂商才优先于全局选择；用户真实配置了历史默认渠道的密钥时，不做任何替换。
+- 历史默认渠道没有密钥且没有全局选择时，报错必须指向可执行动作（先到模型设置配置厂商并选择一个模型），不能只报“未配置 DeepSeek 的 API Key”。
+- 新增辅助型 AI 能力时不要再写死厂商字面量；不指定厂商就能自动获得上面的解析顺序。快速配置就绪判定同样读取这份解析结果，不会因为路由表为空就判定“任务缺少模型路由”。
+
 ## 示例
 
 推荐做法：
@@ -63,6 +78,8 @@
 - 模型目录地址出现 `/models/models`：检查地址归一函数是否把用户填写的完整目录地址再次拼接，不要为单个厂商增加硬编码例外。
 - Kimi K3 返回 temperature 参数错误：先确认实际模型名进入 Kimi 能力兼容层（包括自定义中转厂商），再检查最终客户端配置是否在构造请求前把 temperature 收敛为 `1.0`；不要要求用户反复调整顶部偏好来规避固定参数约束。
 - 本地模型生成世界观在约 2 分钟时中断：先看「模型与厂商」里的单次生成最长等待是否仍是 2 分钟，再确认失败的是按主题生成或骨架生成。正文生成没有这项上限。页面若先报网络失败，检查这两次生成请求的页面等待是否仍长于服务端上限。
+- 只用自建网关时，新建小说推荐、世界观生成、写作公式、标题工坊报“未配置 XX 的 API Key”：先看 `AppSetting.llm.currentSelection` 是否存在且该厂商 `isActive` 并有密钥，再看是否被路由行指向了未配置的厂商；不要为单个功能增加硬编码厂商例外，也不要在服务层重复实现渠道回落。
+- 渠道被替换后模型名仍是旧渠道的：检查 `resolveLLMClientOptions()` 的替换分支是否同时改写了 resolvedModel。
 
 ## 本地推理开关的协议边界
 
@@ -78,8 +95,11 @@ Ollama 的 OpenAI 兼容接口 `/v1/chat/completions` 在关闭思考时发送 `
 - `server/src/services/settings/worldGeneration/timeoutSettings.ts`
 - `server/src/routes/settings/llmSelectionRoutes.ts`
 - `server/src/routes/settings.ts`
+- `server/src/llm/modelRouter.ts`
+- `server/src/llm/factory.ts`
 - `server/src/llm/modelCatalog.ts`
 - `server/src/llm/capabilities.ts`
+- `server/src/modules/setup/onboarding/application/QuickSetupService.ts`
 - `client/src/components/layout/LLMSelectionBootstrap.tsx`
 - `client/src/components/common/LLMSelector.tsx`
 - `client/src/store/llmStore.ts`
@@ -90,4 +110,5 @@ Ollama 的 OpenAI 兼容接口 `/v1/chat/completions` 在关闭思考时发送 `
 ## 来源文档
 
 - [模块边界与文档治理](./module-boundaries.md)
+- [自定义网关的连接合同与探测预算](../debugging/custom-gateway-connection-contract.md)
 - [项目协作规则](../../../AGENTS.md)

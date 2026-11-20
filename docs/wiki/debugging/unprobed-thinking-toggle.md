@@ -4,8 +4,8 @@
 
 结构化调用要求模型不思考（`requiresNonThinkingForStructured`），
 工厂层会按档案里的 `thinkingToggle` 生成关闭思考的线上参数
-（`thinking` / `enable_thinking` / `thinking_boolean` /
-`reasoning_effort`）。档案分三档：内建默认值（按厂商/模型名识别）、
+（`thinking` / `enable_thinking` / `chat_template_kwargs` /
+`thinking_boolean` / `reasoning_effort`）。档案分三档：内建默认值（按厂商/模型名识别）、
 探测结论、用户手动覆盖。
 
 ## Current Rule
@@ -26,11 +26,28 @@
   `requiresNonThinkingForStructured` 为真且 `supportsReasoningToggle`
   为假时，提示用户先做一次兼容探测，而不是只说“关闭深度思考”。
 
+## 自建推理服务把开关放在模板参数里
+
+vLLM、SGLang 一类自建服务只读取
+`chat_template_kwargs: {"enable_thinking": false}`，顶层同名参数和
+`reasoning_effort` 会被静默接受但不生效。这类端点上的典型表现是：连接检测
+通过、结构化模式全部可用，但结构化调用一直把输出额度花在思考上，先报
+`output_budget_exhausted`，调高额度后变成 `reasoning_budget_exhausted`。
+
+- 探测的候选开关因此包含 `chat_template_enable_thinking`，判定依据仍是“思考
+  输出是否真的消失”，不是参数是否被接受；被忽略的候选会因思考仍在而被排除。
+- 这条结论只能由探测结论或用户手动覆盖写入档案，内建默认值不猜：自建地址和
+  模型名无法唯一区分 vLLM 和其它实现，与上面的保守姿态一致。
+- 排查时先看 `GET /api/settings/model-compat/:provider` 的
+  `profile.thinkingToggle.control` 与 `reasoningField`，再决定是否发起一次探测；
+  不要靠继续调高输出 Token 上限来掩盖思考没有被真正关闭。
+
 ## Related Modules
 
 - `server/src/llm/compatibility/defaults.ts`（内建档案）
 - `server/src/llm/compatibility/probe.ts`（探测与 opt-in）
 - `server/src/llm/compatibility/adapter.ts`（`thinkingControlKwargs`）
+- `server/src/llm/compatibility/profile.ts`（`thinkingToggle.control` 取值集合，与设置页手动覆盖选项保持一致）
 - `server/src/llm/factory.ts`（`shouldForceDisableReasoning`）
 - `server/src/llm/structuredInvoke.ts`（`summarizeStructuredOutputFailure`）
 - 回归测试：`server/tests/structuredReasoningExhaustedProbeHint.test.js`

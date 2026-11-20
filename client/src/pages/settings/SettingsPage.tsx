@@ -22,6 +22,13 @@ import { AUTO_DIRECTOR_MOBILE_CLASSES } from "@/mobile/autoDirector";
 
 function formatConnectionTestResult(response: Awaited<ReturnType<typeof testLLMConnection>>): string {
   const latency = response.data?.latency ?? 0;
+  const embedding = response.data?.embedding;
+  if (response.data?.embeddingOnly) {
+    const embeddingText = embedding?.ok
+      ? `向量化接口正常${embedding.latency != null ? ` (${embedding.latency}ms)` : ""}`
+      : "向量化接口未确认";
+    return `连接成功，总耗时 ${latency}ms · 这是向量化专用渠道（${embeddingText}）。正文对话与结构化输出在该地址不可用，请到知识库设置的向量服务中选择它。`;
+  }
   const plain = response.data?.plain;
   const structured = response.data?.structured;
   const plainText = plain

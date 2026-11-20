@@ -7,6 +7,7 @@ import type {
   ModelRouteTaskType,
 } from "@ai-novel/shared/types/novel";
 import { getLLM, resolveLLMClientOptions } from "./factory";
+import { extractReasoningTextFromChunk } from "./reasoning";
 import {
   MODEL_ROUTE_TASK_TYPES,
   resolveModel,
@@ -14,6 +15,8 @@ import {
   upsertModelRouteConfig,
 } from "./modelRouter";
 import { invokeStructuredLlmDetailed, summarizeStructuredOutputFailure } from "./structuredInvoke";
+import { buildProviderModelHeaders } from "./modelCatalog";
+import { normalizeBaseURL } from "./providers";
 import { toText } from "../services/novel/novelP0Utils";
 import {
   resolveStructuredOutputProfile,
@@ -27,6 +30,16 @@ export type ConnectivityProbeMode = "plain" | "structured" | "both";
 const STRUCTURED_PROBE_SCHEMA = z.object({
   status: z.literal("ok"),
 });
+
+// 思考型模型会先把输出额度花在推理上，探测预算过小会把可用渠道误判成不可用。
+const PLAIN_PROBE_MAX_TOKENS = 512;
+const STRUCTURED_PROBE_MAX_TOKENS = 1024;
+
+const PROTOCOL_LABELS: Record<ModelRouteRequestProtocol, string> = {
+  auto: "自动协议",
+  openai_compatible: "OpenAI 兼容协议",
+  anthropic: "Anthropic 协议",
+};
 
 export interface ConnectivityProbeStatus {
   ok: boolean;
@@ -51,6 +64,17 @@ export interface LLMConnectivityStatus extends ConnectivityProbeStatus {
   model: string;
   plain: ConnectivityProbeStatus | null;
   structured: StructuredConnectivityProbeStatus | null;
+  /** 仅在厂商检测入口的增强路径上填充：向量化端点的真实请求结果。 */
+  embedding?: EmbeddingProbeStatus | null;
+  /** 为 true 表示该地址只提供向量化能力，对话与结构化接口不可用。 */
+  embeddingOnly?: boolean;
+}
+
+export interface EmbeddingProbeStatus {
+  ok: boolean;
+  latency: number | null;
+  error: string | null;
+  endpoint: string | null;
 }
 
 export interface ModelRouteConnectivityStatus extends LLMConnectivityStatus {
@@ -62,6 +86,42 @@ function toErrorMessage(error: unknown): string {
     return error.message.trim();
   }
   return "连接测试失败。";
+}
+
+interface ProbeAttemptFailure {
+  requestProtocol: ModelRouteRequestProtocol;
+  error: string;
+}
+
+/**
+ * 一次检测会按顺序尝试多个请求协议，只保留最后一个错误会让用户看到与自身配置无关的
+ * 协议报错，因此按协议分别列出失败原因。
+ */
+function summarizeProbeFailures(attempts: ProbeAttemptFailure[]): string {
+  const lines: string[] = [];
+  for (const attempt of attempts) {
+    const line = `${PROTOCOL_LABELS[attempt.requestProtocol]}：${attempt.error}`;
+    if (!lines.includes(line)) {
+      lines.push(line);
+    }
+  }
+  return lines.join("；");
+}
+
+function withProbeFailureSummary(
+  status: LLMConnectivityStatus | null,
+  attempts: ProbeAttemptFailure[],
+): LLMConnectivityStatus | null {
+  if (!status || status.ok || attempts.length === 0) {
+    return status;
+  }
+  const error = summarizeProbeFailures(attempts);
+  return {
+    ...status,
+    error,
+    plain: status.plain ? { ...status.plain, error } : null,
+    structured: status.structured ? { ...status.structured, error } : null,
+  };
 }
 
 function getProtocolCandidates(preferred?: ModelRouteRequestProtocol): ModelRouteRequestProtocol[] {
@@ -112,7 +172,7 @@ async function testPlainConnection(input: {
       authMode: input.authMode,
       model: input.model,
       temperature: 0.1,
-      maxTokens: 16,
+      maxTokens: PLAIN_PROBE_MAX_TOKENS,
       requestProtocol: input.requestProtocol,
     });
     const llm = await getLLM(input.provider, {
@@ -121,14 +181,19 @@ async function testPlainConnection(input: {
       authMode: input.authMode,
       model: resolved.model,
       temperature: 0.1,
-      maxTokens: 16,
+      maxTokens: PLAIN_PROBE_MAX_TOKENS,
       requestProtocol: resolved.requestProtocol,
     });
     const start = Date.now();
     const stream = await llm.stream([new HumanMessage("请只回复 ok")]);
     let content = "";
-    for await (const chunk of stream) content += toText(chunk.content);
-    if (!content.trim()) {
+    let reasoning = "";
+    for await (const chunk of stream) {
+      content += toText(chunk.content);
+      reasoning += extractReasoningTextFromChunk(chunk);
+    }
+    // 推理内容已经证明请求被模型处理，不能因为它占满额度就判渠道不可用。
+    if (!content.trim() && !reasoning.trim()) {
       throw new Error("模型连接已建立，但返回了空正文，无法确认渠道可用。请检查渠道协议、模型能力及思考设置。");
     }
     const plain = {
@@ -182,7 +247,7 @@ async function testStructuredConnection(input: {
     authMode: input.authMode,
     model: input.model,
     temperature: 0.2,
-    maxTokens: 256,
+    maxTokens: STRUCTURED_PROBE_MAX_TOKENS,
     requestProtocol: input.requestProtocol,
     structuredStrategy: toStructuredOutputStrategy(input.structuredResponseFormat ?? "auto") ?? undefined,
     executionMode: "plain",
@@ -196,7 +261,7 @@ async function testStructuredConnection(input: {
       baseURL: input.baseURL ?? resolved.baseURL,
       authMode: input.authMode ?? resolved.authMode,
       temperature: 0.2,
-      maxTokens: 256,
+      maxTokens: STRUCTURED_PROBE_MAX_TOKENS,
       taskType: "planner",
       requestProtocol: resolved.requestProtocol,
       structuredStrategy: toStructuredOutputStrategy(input.structuredResponseFormat ?? "auto") ?? undefined,
@@ -304,13 +369,20 @@ async function testConnection(input: {
   const probeMode = input.probeMode ?? "both";
   let plain: LLMConnectivityStatus | null = null;
   let structured: LLMConnectivityStatus | null = null;
+  const plainAttempts: ProbeAttemptFailure[] = [];
+  const structuredAttempts: ProbeAttemptFailure[] = [];
   if (probeMode === "plain" || probeMode === "both") {
     for (const requestProtocol of getProtocolCandidates(input.requestProtocol)) {
       plain = await testPlainConnection({ ...input, requestProtocol });
       if (plain.ok) {
         break;
       }
+      plainAttempts.push({
+        requestProtocol: plain.plain?.requestProtocol ?? requestProtocol,
+        error: plain.plain?.error ?? "连接测试失败。",
+      });
     }
+    plain = withProbeFailureSummary(plain, plainAttempts);
   }
   if (probeMode === "structured" || probeMode === "both") {
     for (const requestProtocol of getProtocolCandidates(input.requestProtocol)) {
@@ -329,7 +401,12 @@ async function testConnection(input: {
       if (structured?.ok) {
         break;
       }
+      structuredAttempts.push({
+        requestProtocol: structured?.structured?.requestProtocol ?? requestProtocol,
+        error: structured?.structured?.error ?? "连接测试失败。",
+      });
     }
+    structured = withProbeFailureSummary(structured, structuredAttempts);
   }
   return mergeProbeStatuses({
     provider: input.provider,
@@ -414,7 +491,70 @@ async function testModelRoutes(taskTypes: readonly ModelRouteTaskType[] = MODEL_
   };
 }
 
+/**
+ * 向量化专用渠道（如 embedding 服务）没有对话接口，对话探测必然失败。
+ * 这里直接请求向量化端点验证真实能力，判定依据是请求结果而不是错误文案。
+ */
+export async function probeEmbeddingEndpoint(input: {
+  provider: LLMProvider;
+  model?: string;
+  apiKey?: string;
+  baseURL?: string;
+  authMode?: ProviderAuthMode;
+}): Promise<EmbeddingProbeStatus> {
+  const baseURL = input.baseURL?.trim();
+  if (!baseURL) {
+    return { ok: false, latency: null, error: "未配置可用的 API URL。", endpoint: null };
+  }
+  const model = input.model?.trim() || "embedding";
+  // 用户粘贴的地址可能以 /embeddings 结尾，与模型目录、对话请求共用同一套尾部剥离规则。
+  const endpoint = `${normalizeBaseURL(baseURL).replace(/\/+$/, "")}/embeddings`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  const start = Date.now();
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        ...buildProviderModelHeaders(input.provider, input.apiKey, input.authMode ?? "bearer"),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model, input: "连接测试" }),
+      signal: controller.signal,
+    });
+    const latency = Date.now() - start;
+    const raw = await response.text();
+    if (!response.ok) {
+      return {
+        ok: false,
+        latency,
+        error: `向量化接口返回 ${response.status}：${raw.slice(0, 160) || "未知错误"}`,
+        endpoint,
+      };
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return { ok: false, latency, error: "向量化接口返回的内容不是 JSON。", endpoint };
+    }
+    const data = (payload as { data?: unknown }).data;
+    if (!Array.isArray(data) || data.length === 0) {
+      return { ok: false, latency, error: "向量化接口返回了空结果。", endpoint };
+    }
+    return { ok: true, latency, error: null, endpoint };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return { ok: false, latency: Date.now() - start, error: "向量化接口请求超时。", endpoint };
+    }
+    return { ok: false, latency: Date.now() - start, error: toErrorMessage(error), endpoint };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const llmConnectivityService = {
   testConnection,
   testModelRoutes,
+  probeEmbeddingEndpoint,
 };

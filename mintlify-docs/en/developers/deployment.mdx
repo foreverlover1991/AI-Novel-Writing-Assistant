@@ -111,14 +111,16 @@ The database uses PostgreSQL, and the connection string is passed via `DATABASE_
 
 ## Optional: Qdrant Vector Service
 
-If you need knowledge base vector retrieval, the repository provides a standalone Qdrant service definition in `infra/docker-compose.qdrant.yml`:
+The full self-hosting stack in `infra/docker-compose.deploy.yml` already includes a Qdrant service; start it by following that guide, no separate compose file is needed.
+
+If you only need a standalone Qdrant for a backend running from source on the host:
 
 ```bash
-cd infra
-docker compose -f docker-compose.qdrant.yml up -d
+docker run -d --name ai-novel-qdrant -p 6333:6333 -p 6334:6334 \
+  -v qdrant_storage:/qdrant/storage qdrant/qdrant:v1.19
 ```
 
-By default it exposes port `6333` (REST) and `6334` (gRPC), with a data volume named `qdrant_storage`. After starting it, point `QDRANT_URL` in `server/.env` to that address and confirm `RAG_ENABLED=true`.
+It exposes port `6333` (REST) and `6334` (gRPC). After starting it, point `QDRANT_URL` in `server/.env` to that address and confirm `RAG_ENABLED=true`.
 
 ## Security Recommendations
 

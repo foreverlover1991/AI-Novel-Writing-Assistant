@@ -4,7 +4,7 @@
 
 项目有三条交付路径：桌面版（后端以子进程内嵌）、Docker 自托管 Web、宿主机源码运行。桌面版是普通用户主路径，自托管 Web 面向服务器/NAS 用户。
 
-在桌面版成熟后，自托管路径长期缺少一个可执行的完整编排：仓库里只有 `Dockerfile.api`、`Dockerfile.web` 和只起向量库的 `docker-compose.qdrant.yml`，没有把 PostgreSQL、Qdrant、后端、Web 组织到一起的编排文件，也没有说明空库如何初始化。结果是部署者容易踩到两个已知陷阱：在空 PostgreSQL 上直接跑 `prisma migrate deploy`（会失败），以及把后端端口直接暴露到公网。
+在桌面版成熟后，自托管路径长期缺少一个可执行的完整编排：仓库里只有 `Dockerfile.api`、`Dockerfile.web` 和一个只起向量库的独立 Qdrant 编排（后被完整编排取代并删除），没有把 PostgreSQL、Qdrant、后端、Web 组织到一起的编排文件，也没有说明空库如何初始化。结果是部署者容易踩到两个已知陷阱：在空 PostgreSQL 上直接跑 `prisma migrate deploy`（会失败），以及把后端端口直接暴露到公网。
 
 本次部署还在受限环境里暴露了几类与代码无关但会反复出现的构建约束：镜像仓库不可达、宿主 glibc/Python 版本过旧无法编译原生模块、宿主 Docker 的默认 seccomp 策略过严。这些约束都需要写清楚归属边界，否则每次部署都会重新诊断一遍。
 
@@ -15,6 +15,7 @@
 3. **后端镜像基础镜像固定为 `node:24-alpine`**：与本机已有镜像对齐，同时通过 `NODE_IMAGE` 构建参数保留切换空间。
 4. **唯一对外端口是 Web 的 `8080`**：后端监听容器内 `0.0.0.0:3000` 但不发布宿主机端口；数据库与向量库只在内部网络可达。
 5. **迁移是编排内的一次性任务**：`migrate` 服务挂 `tools` profile，入口固定为 `scripts/deploy-prisma-postgres.cjs`。
+6. **镜像名直接写在编排的 `image:` 字段，不留 `.env` 变量**：postgres/nginx 固定取内网仓库 `10.62.107.200:30085/agentops/middleware/` 的 arm64 标签，后端与迁移用本机构建的 `ai-novel-api:latest`；qdrant 在内网仓库没有对应 repository，保留 Docker Hub 官方名。不留变量是为了避免“编排默认值与 .env 覆盖值”两处事实源。
 
 ## 当前规则
 
@@ -60,7 +61,7 @@ docker-compose -f docker-compose.deploy.yml up -d
 
 不推荐：
 
-- 为换镜像名去改编排文件里的 `image:` 字面量。
+- 把镜像名改回 `.env` 变量加默认值的形式，形成两处事实源。
 - 用 `Dockerfile.web` 构建镜像后再挂 nginx 配置文件，两个配置来源会互相覆盖。
 - 在空库上直接 `prisma migrate deploy`，或为了让后端"先起来"跳过迁移。
 - 把 `api` 的 3000 端口发布到宿主机以便调试，然后忘记收回。

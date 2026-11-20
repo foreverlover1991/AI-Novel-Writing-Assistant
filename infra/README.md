@@ -7,7 +7,6 @@
 | 文件 | 用途 |
 | --- | --- |
 | `docker-compose.deploy.yml` | 本手册的完整编排：PostgreSQL + Qdrant + 后端 + Web |
-| `docker-compose.qdrant.yml` | 只单独起一个 Qdrant，给宿主机源码运行的后端用 |
 | `nginx/ai-novel-web.conf` | 镜像内置的 Web 配置（`Dockerfile.web` 使用），只伺服 SPA，不代理 API |
 | `nginx/ai-novel-web-proxy.conf` | 本编排使用的 Web 配置，SPA + `/api` 反向代理到后端容器 |
 | `.env.example` | 变量模板，复制为 `.env` 后填写 |
@@ -29,11 +28,10 @@
 
 - Docker 与 docker-compose v2。
 - Node.js 与 pnpm 满足根 `package.json` 的 `engines`，仅用于在宿主机打包前端。
-- 本机已有的镜像（名称可在 `.env` 覆盖，不需要联网拉取）：
-  - 后端基础镜像 `node:24-alpine`（`Dockerfile.api` 的默认 `NODE_IMAGE`）
-  - `postgres:16.15`、`qdrant/qdrant:v1.19`、`nginx:1.30.2`
-
-如果本机镜像带着私有仓库前缀（例如 `docker.m.daocloud.io/library/node:24-alpine`），先用 `docker tag` 补一个短名，再在 `.env` 里覆盖镜像变量。
+- 编排文件里的镜像名已直接写在 `image:` 字段，不需要联网拉取，但本机要先有这些镜像：
+  - 内网仓库 `10.62.107.200:30085/agentops/middleware/postgres:16.15-arm64` 与 `.../nginx:1.30.2-arm64`
+  - Qdrant 用 Docker Hub 官方名 `qdrant/qdrant:v1.19`（内网仓库没有 qdrant repository）
+  - 后端构建基础镜像 `node:24-alpine`（`Dockerfile.api` 的 `NODE_IMAGE`，可用 `--build-arg` 覆盖）
 
 ## 部署步骤
 
@@ -123,7 +121,7 @@ docker-compose -f docker-compose.deploy.yml --profile tools run --rm migrate
 
 ```bash
 docker-compose -f docker-compose.deploy.yml stop api web
-docker run --rm -v ai-novel-web_ai-novel-postgres:/db -v "$PWD:/out" postgres:16.15 \
+docker run --rm -v ai-novel-web_ai-novel-postgres:/db -v "$PWD:/out" 10.62.107.200:30085/agentops/middleware/postgres:16.15-arm64 \
   pg_dump -U ai_novel -d ai_novel -F c -f /out/backup.dump
 docker-compose -f docker-compose.deploy.yml start api web
 ```

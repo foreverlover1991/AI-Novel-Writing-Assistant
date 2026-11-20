@@ -111,14 +111,16 @@ API 镜像把图片资产保存在 `/app/storage/generated-images`。运行时�
 
 ## 可选：Qdrant 向量服务
 
-若需要知识库向量检索，仓库 `infra/docker-compose.qdrant.yml` 提供独立的 Qdrant 服务定义：
+完整自托管编排 `infra/docker-compose.deploy.yml` 已包含 Qdrant 服务，跟随其部署手册启动即可，无需单独建编排。
+
+若只想给宿主机源码运行的后端单独起一个 Qdrant：
 
 ```bash
-cd infra
-docker compose -f docker-compose.qdrant.yml up -d
+docker run -d --name ai-novel-qdrant -p 6333:6333 -p 6334:6334 \
+  -v qdrant_storage:/qdrant/storage qdrant/qdrant:v1.19
 ```
 
-默认暴露 `6333`（REST）与 `6334`（gRPC）端口，数据卷为 `qdrant_storage`。启动后在 `server/.env` 中把 `QDRANT_URL` 指向该地址，并确认 `RAG_ENABLED=true`。
+它暴露 `6333`（REST）与 `6334`（gRPC）。启动后在 `server/.env` 中把 `QDRANT_URL` 指向该地址，并确认 `RAG_ENABLED=true`。
 
 ## 安全建议
 

@@ -234,6 +234,18 @@ export const promptAssetLoaderEntries: PromptAssetLoaderEntry[] = [
     load: () => require("../prompts/rag/contextualChunk.prompts").ragContextualChunkPrompt as UnknownPromptAsset,
   },
   {
+    key: "assistant.intent.route@v1",
+    load: () => require("../prompts/assistant/assistant.prompts").assistantIntentRoutePrompt as UnknownPromptAsset,
+  },
+  {
+    key: "assistant.docs.select@v1",
+    load: () => require("../prompts/assistant/assistant.prompts").assistantDocsSelectPrompt as UnknownPromptAsset,
+  },
+  {
+    key: "assistant.answer.compose@v1",
+    load: () => require("../prompts/assistant/assistant.prompts").assistantAnswerComposePrompt as UnknownPromptAsset,
+  },
+  {
     key: "novel.director.candidates@v2",
     load: () => require("../prompts/novel/directorPlanning.prompts").directorCandidatePrompt as UnknownPromptAsset,
   },

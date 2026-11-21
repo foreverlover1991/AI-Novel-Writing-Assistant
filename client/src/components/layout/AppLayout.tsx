@@ -7,6 +7,7 @@ import NovelWorkspaceRail from "./NovelWorkspaceRail";
 import Sidebar from "./Sidebar";
 
 import AutoDirectorPauseNotificationWatcher from "@/components/autoDirector/AutoDirectorPauseNotificationWatcher";
+import AssistantFloatingPanel from "@/components/assistant/AssistantFloatingPanel";
 import { TaskRecoveryProvider } from "./TaskRecoveryContext";
 import TaskRecoveryDialog from "./TaskRecoveryDialog";
 import { useIsMobileViewport } from "./mobile/useIsMobileViewport";
@@ -107,6 +108,7 @@ export default function AppLayout() {
               <Outlet />
             </Suspense>
             <TaskRecoveryDialog />
+            <AssistantFloatingPanel />
           </div>
         </TaskRecoveryProvider>
       </CreationSetupProvider>
@@ -149,6 +151,7 @@ export default function AppLayout() {
         </div>
         {isDirectorWorkbench ? <Dialog open={projectMenuOpen} onOpenChange={setProjectMenuOpen}><DialogContent aria-describedby={undefined} className="max-h-[90dvh] w-auto overflow-y-auto p-4"><DialogTitle>全局菜单</DialogTitle><Sidebar collapsed={false} onToggle={() => setProjectMenuOpen(false)} /></DialogContent></Dialog> : null}
         <TaskRecoveryDialog />
+        <AssistantFloatingPanel />
       </div>
     </TaskRecoveryProvider>
     </CreationSetupProvider>

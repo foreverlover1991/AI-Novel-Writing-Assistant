@@ -17,6 +17,7 @@ export type TaskType =
   | "chapter_repair"
   | "summary_generation"
   | "chat"
+  | "assistant"
   | "default";
 
 const TASK_TYPE_ALIASES: Partial<Record<TaskType, ModelRouteTaskType>> = {
@@ -26,6 +27,8 @@ const TASK_TYPE_ALIASES: Partial<Record<TaskType, ModelRouteTaskType>> = {
   chapter_repair: "repair",
   summary_generation: "summary",
   fact_extraction: "fact_extraction",
+  // AI 助手沿用 chat 路由：不新增 MODEL_ROUTE_TASK_TYPES 条目，避免拉高 onboarding「未配置」比例。
+  assistant: "chat",
 };
 
 export const MODEL_ROUTE_TASK_TYPES: ModelRouteTaskType[] = [

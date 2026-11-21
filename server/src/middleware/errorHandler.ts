@@ -147,6 +147,10 @@ function setRequestErrorMessage(
 
 function logServerError(req: Request, error: unknown): void {
   console.error(`[error] requestId=${req.res?.locals.requestId ?? "unavailable"} ${req.method} ${req.originalUrl}`, error);
+  // 堆栈经启动层注册的全局汇接点落盘运行日志，供 AI 助手检索诊断；
+  // 本文件会被受限沙箱测试零依赖加载，不能直接 import fs 日志模块。
+  const sink = (globalThis as { aiNovelServerErrorSink?: (label: string, error: unknown) => void }).aiNovelServerErrorSink;
+  sink?.(`[error] requestId=${req.res?.locals.requestId ?? "unavailable"} ${req.method} ${req.originalUrl}`, error);
 }
 
 function collectErrorMessages(error: unknown, depth = 0): string[] {

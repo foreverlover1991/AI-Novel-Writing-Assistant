@@ -26,6 +26,7 @@ import characterRouter from "./routes/character";
 import characterConversationRouter from "./modules/characterConversation/http/characterConversationRoutes";
 import visualAssetRouter from "./modules/visualAssets/http/visualAssetRoutes";
 import chatRouter from "./routes/chat";
+import assistantRouter from "./routes/assistant";
 import creativeHubRouter from "./routes/creativeHub";
 import genreRouter from "./routes/genre";
 import healthRouter from "./routes/health";
@@ -73,10 +74,20 @@ import { qualityDebtSettingsService } from "./services/settings/QualityDebtSetti
 import { marketRadarService } from "./modules/marketRadar/application/MarketRadarService";
 import { DirectorWorker } from "./workers/directorWorker";
 import { cleanupLogDirectory, resolveLogRetentionConfig } from "./platform/logging/logRetention";
+import { appendRuntimeErrorLine, appendRuntimeErrorStack } from "./platform/logging/runtimeFileLog";
 import { resolveLogsRoot } from "./runtime/appPaths";
 
 getSharedNovelServices();
 registerNovelEventHandlers(novelEventBus);
+
+// 未捕获异常同步落盘运行日志，保证 AI 助手事后能检索到堆栈证据。
+(globalThis as { aiNovelServerErrorSink?: (label: string, error: unknown) => void }).aiNovelServerErrorSink = appendRuntimeErrorStack;
+process.on("unhandledRejection", (reason) => {
+  appendRuntimeErrorStack("[process.unhandledRejection]", reason);
+});
+process.on("uncaughtException", (error) => {
+  appendRuntimeErrorStack("[process.uncaughtException]", error);
+});
 const novelPipelineRuntimeService = new NovelPipelineRuntimeService();
 
 morgan.token("error-message", (_req, res) => {
@@ -133,7 +144,12 @@ export function createApp() {
     const contentLength = tokens.res(req, res, "content-length") ?? "0";
     const errorMessage = tokens["error-message"](req, res);
     const errorSuffix = errorMessage ? ` | error: ${errorMessage}` : "";
-    return `${method} ${url} ${status} ${responseTime} ms - ${contentLength}${errorSuffix}`;
+    const line = `${method} ${url} ${status} ${responseTime} ms - ${contentLength}${errorSuffix}`;
+    // 错误请求同步落盘到运行日志，供 AI 助手检索诊断；正常请求只走 stdout。
+    if (errorMessage || Number.parseInt(status, 10) >= 400) {
+      appendRuntimeErrorLine(line);
+    }
+    return line;
   }));
   // Raw TXT bytes use base64 JSON; scope the transport allowance, decoded limit remains 20 MiB.
   app.use("/api/manuscripts/imports",express.json({limit:"30mb"}));
@@ -219,6 +235,7 @@ export function createApp() {
   app.use("/api/character-conversations", characterConversationRouter);
   app.use("/api/writing-formula", writingFormulaRouter);
   app.use("/api/chat", chatRouter);
+  app.use("/api/assistant", assistantRouter);
   app.use("/api/creative-hub", creativeHubRouter);
   app.use("/api/prompt-workbench", promptWorkbenchRouter);
   app.use("/api/images", imagesRouter);

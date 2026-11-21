@@ -149,4 +149,5 @@ docker-compose -f docker-compose.yml --env-file .env start api web
 - `data/generated-images`：生成的图片资产。
 - `data/qdrant`：向量索引，丢了可重建，但重新索引需要消耗模型调用。
 - `data/logs`：LLM 会话日志（14 天 / 50MB 自动清理）与 nginx 访问日志，可直接查看或归档。
+- `data/logs/server`：服务端运行错误日志 `runtime-<日期>.log`（status >= 400 的请求、未捕获异常，同样 14 天 / 50MB 自动清理）；排查线上故障与 AI 助手系统诊断都依赖它，建议一并纳入备份与归档。
 - 旧命名卷 `ai-novel-web_ai-novel-*` 只在首次迁移 data 目录时作为数据源，迁移完成后可保留待删。

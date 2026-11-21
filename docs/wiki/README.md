@@ -24,6 +24,7 @@ Wiki 不记录单次提交改了什么，也不替代 release notes。它只记�
 - [API 访问令牌边界](./architecture/access-token-boundary.md)
 - [Web 自托管部署拓扑与构建约束](./architecture/web-deployment-topology.md)
 - [独立大纲工作台边界](./architecture/outline-workbench.md)
+- [AI 助手边界](./architecture/ai-assistant-boundary.md)
 
 ### Workflows
 
